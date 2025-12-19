@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # 1. 구글 드라이브 마운트 (Rclone)
+  # ==========================================
+  drive_mount:
+    image: rclone/rclone:latest
+    container_name: rclone_mount
+    restart: always
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+    environment:
+      - PHP_TZ=Asia/Seoul
+    volumes:
+      # [설정 파일]
+      - ./rclone.conf:/config/rclone/rclone.conf
+      # [마운트 경로] 호스트의 ./output 폴더에 마운트
+      - ./output:/data/mount:rshared
+      # [로그]
+      - ./logs:/data/logs
+      
+    # -------------------------------------------------------
+    # [옵션 선택] 사용할 환경의 주석(#)을 풀어서 사용하세요.
+    # -------------------------------------------------------
+    
+    # [A] Oracle Cloud
+    # command: >
+    #   mount "output:/Archive/" "/data/mount"
+    #   --allow-other
+    #   --allow-non-empty
+    #   --vfs-cache-mode writes
+    #   --vfs-cache-max-age 5m
+    #   --vfs-write-back 30s
+    #   --transfers 2
+    #   --drive-upload-cutoff 1000T
+    #   --tpslimit 10
+    #   --tpslimit-burst 10
+    #   --drive-chunk-size 128M
+    #   --bwlimit "23:30,12M 04:30,off"
+    #   --timeout 60s
+    #   --contimeout 10s
+    #   --stats 30s
+    #   --stats-log-level INFO
+    #   --log-level INFO
+    #   --log-file /data/logs/drive-enhanced.log
+
+    # [B] GCP (기본 설정)
+    command: >
+      mount "output:/Archive/Test" "/data/mount"
+      --allow-other
+      --allow-non-empty
+      --log-level INFO
+      --log-file /data/logs/drive.log
+
+
+
+  # ==========================================
+  # 2. Starec2 메인 (녹화 담당)
+  # ==========================================
+  starec2:
+    build: .
+    container_name: starec2_main
+    command: python main.py
+    restart: always
+    
+    # [수정] rclone이 켜지면 무조건 같이 켜지도록 변경
+    depends_on:
+      - drive_mount
+
+    
+    environment:
+      - TZ=Asia/Seoul
+    
+    ports:
+      - "13901:13901"
+      - "6969:6969"
+    
+    volumes:
+      - ./rclone.conf:/root/.config/rclone/rclone.conf
+      - ./output:/app/output:rslave
+      - ./logs:/app/logs
+    
+    privileged: true
+    devices:
+      - /dev/fuse
+    cap_add:
+      - SYS_ADMIN
+
+  # ==========================================
+  # 3. OCI Monitor (모니터링 담당) - GCP 사용 X
+  # ==========================================
+#  monitor:
+#    build: .
+#    container_name: starec2_monitor
+#    command: python oci_monitor.py
+#    restart: always
+#    pid: "host"
+#    environment:
+#      - TZ=Asia/Seoul
+#    volumes:
+#      - ./logs:/app/logs
+
+
+# Slack ChatBot 
+  ops_bot:
+    build: .  
+    container_name: starec_ops_bot
+    command: python ops_bot.py
+    restart: always
+    environment:
+      - SLACK_BOT_TOKEN=""
+      - SLACK_APP_TOKEN=""
+
+      - TZ=Asia/Seoul
+    volumes:
+      # 호스트의 도커 소켓 공유 (필수)
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./logs:/app/logs:ro
